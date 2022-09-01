@@ -1,15 +1,17 @@
 #![no_std]
 #![no_main]
 
-use embedded_hal::digital::v2::OutputPin;
+use core::fmt;
+
+use embedded_hal::digital::v2::{InputPin, OutputPin};
 use panic_halt as _;
 use rp_pico::{
     entry,
     hal::{
         self,
         gpio::{
-            bank0::{Gpio0, Gpio1},
-            Output, Pin, PushPull,
+            bank0::{Gpio0, Gpio1, Gpio25},
+            Floating, Input, Output, Pin, PushPull,
         },
         pac::{self, interrupt},
         pwm::InputHighRunning,
@@ -18,6 +20,7 @@ use rp_pico::{
     },
 };
 
+use heapless::String;
 use usb_device::{
     class_prelude::UsbBusAllocator,
     device::{UsbDevice, UsbDeviceBuilder, UsbVidPid},
@@ -28,19 +31,34 @@ static mut USB_BUS: Option<UsbBusAllocator<UsbBus>> = None;
 static mut USB_DEVICE: Option<UsbDevice<UsbBus>> = None;
 static mut USB_SERIAL: Option<SerialPort<UsbBus>> = None;
 
-fn set_up(out_1: &mut Pin<Gpio0, Output<PushPull>>, out_2: &mut Pin<Gpio1, Output<PushPull>>) {
+fn set_up(
+    out_1: &mut Pin<Gpio0, Output<PushPull>>,
+    out_2: &mut Pin<Gpio1, Output<PushPull>>,
+    led_pin: &mut Pin<Gpio25, Output<PushPull>>,
+) {
     out_1.set_high().unwrap();
     out_2.set_low().unwrap();
+    led_pin.set_high().unwrap();
 }
 
-fn set_down(out_1: &mut Pin<Gpio0, Output<PushPull>>, out_2: &mut Pin<Gpio1, Output<PushPull>>) {
+fn set_down(
+    out_1: &mut Pin<Gpio0, Output<PushPull>>,
+    out_2: &mut Pin<Gpio1, Output<PushPull>>,
+    led_pin: &mut Pin<Gpio25, Output<PushPull>>,
+) {
     out_1.set_low().unwrap();
     out_2.set_high().unwrap();
+    led_pin.set_high().unwrap();
 }
 
-fn set_stop(out_1: &mut Pin<Gpio0, Output<PushPull>>, out_2: &mut Pin<Gpio1, Output<PushPull>>) {
+fn set_stop(
+    out_1: &mut Pin<Gpio0, Output<PushPull>>,
+    out_2: &mut Pin<Gpio1, Output<PushPull>>,
+    led_pin: &mut Pin<Gpio25, Output<PushPull>>,
+) {
     out_1.set_high().unwrap();
     out_2.set_high().unwrap();
+    led_pin.set_low().unwrap();
 }
 
 #[entry]
@@ -100,31 +118,40 @@ fn main() -> ! {
     }
 
     let mut led_pin = pins.led.into_push_pull_output();
-
     let mut out_1 = pins.gpio0.into_push_pull_output();
     let mut out_2 = pins.gpio1.into_push_pull_output();
 
-    let pwm_pin = pins.gpio15.into_floating_input();
-    let mut pwm_slices = hal::pwm::Slices::new(pac.PWM, &mut pac.RESETS);
+    let mut pwm_pin_store = Some(pins.gpio15.into_floating_input());
+    let pwm_slices = hal::pwm::Slices::new(pac.PWM, &mut pac.RESETS);
     let mut pwm = pwm_slices.pwm7.into_mode::<InputHighRunning>();
-    let pwm_pin_token = pwm.input_from(pwm_pin);
-
-    let count = pwm.get_counter();
+    pwm.set_div_int(120);
 
     loop {
-        usb_print("Hej\n");
+        let pwm_pin = pwm_pin_store.take().unwrap();
+        while pwm_pin.is_low().unwrap() {}
 
-        set_up(&mut out_1, &mut out_2);
-        led_pin.set_high().unwrap();
-        delay.delay_ms(500);
+        let pwm_pin_token = pwm.input_from(pwm_pin);
+        pwm.set_counter(0);
+        pwm.enable();
 
-        set_down(&mut out_1, &mut out_2);
-        led_pin.set_low().unwrap();
-        delay.delay_ms(500);
+        delay.delay_ms(10);
 
-        set_stop(&mut out_1, &mut out_2);
-        led_pin.set_high().unwrap();
-        delay.delay_ms(2000);
+        let count = pwm.get_counter();
+
+        pwm.disable();
+        pwm_pin_store = Some(pwm_pin_token.into_mode());
+
+        let mut text = String::<64>::new();
+        fmt::write(&mut text, format_args!("Count: {}\n", count)).unwrap();
+        usb_print(&text);
+
+        if count < 1200 {
+            set_up(&mut out_1, &mut out_2, &mut led_pin);
+        } else if count > 1800 {
+            set_down(&mut out_1, &mut out_2, &mut led_pin);
+        } else {
+            set_stop(&mut out_1, &mut out_2, &mut led_pin);
+        }
     }
 }
 
