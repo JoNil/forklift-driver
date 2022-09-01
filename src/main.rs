@@ -3,10 +3,34 @@
 
 use embedded_hal::digital::v2::OutputPin;
 use panic_halt as _;
-use rp_pico::entry;
-use rp_pico::hal;
-use rp_pico::hal::pac;
-use rp_pico::hal::prelude::*;
+use rp_pico::{
+    entry,
+    hal::{
+        self,
+        gpio::{
+            bank0::{Gpio0, Gpio1},
+            Output, Pin, PushPull,
+        },
+        pac,
+        pwm::{FreeRunning, InputHighRunning},
+        Clock,
+    },
+};
+
+fn set_up(out_1: &mut Pin<Gpio0, Output<PushPull>>, out_2: &mut Pin<Gpio1, Output<PushPull>>) {
+    out_1.set_high().unwrap();
+    out_2.set_low().unwrap();
+}
+
+fn set_down(out_1: &mut Pin<Gpio0, Output<PushPull>>, out_2: &mut Pin<Gpio1, Output<PushPull>>) {
+    out_1.set_low().unwrap();
+    out_2.set_high().unwrap();
+}
+
+fn set_stop(out_1: &mut Pin<Gpio0, Output<PushPull>>, out_2: &mut Pin<Gpio1, Output<PushPull>>) {
+    out_1.set_high().unwrap();
+    out_2.set_high().unwrap();
+}
 
 #[entry]
 fn main() -> ! {
@@ -39,10 +63,27 @@ fn main() -> ! {
 
     let mut led_pin = pins.led.into_push_pull_output();
 
+    let mut out_1 = pins.gpio0.into_push_pull_output();
+    let mut out_2 = pins.gpio1.into_push_pull_output();
+
+    let pwm_pin = pins.gpio15.into_floating_input();
+    let mut pwm_slices = hal::pwm::Slices::new(pac.PWM, &mut pac.RESETS);
+    let mut pwm = pwm_slices.pwm7.into_mode::<InputHighRunning>();
+    let pwm_pin_token = pwm.input_from(pwm_pin);
+
+    let count = pwm.get_counter();
+
     loop {
+        set_up(&mut out_1, &mut out_2);
         led_pin.set_high().unwrap();
         delay.delay_ms(500);
+
+        set_down(&mut out_1, &mut out_2);
         led_pin.set_low().unwrap();
         delay.delay_ms(500);
+
+        set_stop(&mut out_1, &mut out_2);
+        led_pin.set_high().unwrap();
+        delay.delay_ms(2000);
     }
 }
