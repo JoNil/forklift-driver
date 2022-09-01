@@ -11,7 +11,7 @@ use rp_pico::{
         self,
         gpio::{
             bank0::{Gpio0, Gpio1, Gpio25},
-            Floating, Input, Output, Pin, PushPull,
+            Output, Pin, PushPull,
         },
         pac::{self, interrupt},
         pwm::InputHighRunning,
